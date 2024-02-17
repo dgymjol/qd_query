@@ -81,22 +81,24 @@ class QDDETR(nn.Module):
         self.span_embed = MLP(hidden_dim, hidden_dim, span_pred_dim, 3)
         # self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
 
+        self.m_classes=m_classes
         self.cls_both=cls_both
         self.score_fg=score_fg
         
-        if m_classes is None:
+        if self.m_classes is None:
             self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
+            self.num_patterns = 1
         else:
             self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
-            self.class_embed = nn.Linear(hidden_dim, len(self.m_vals) +1 )  # [:-1] : foreground / [-1] : background
-            if self.cls_both:
-                self.aux_class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
+            self.num_patterns = len(self.m_vals)
+            self.aux_class_embed = nn.Linear(hidden_dim, len(self.m_vals) +1 )  # [:-1] : foreground / [-1] : background
+            self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
                 
         self.use_txt_pos = use_txt_pos
         self.n_input_proj = n_input_proj
         # self.foreground_thd = foreground_thd
         # self.background_thd = background_thd
-        self.query_embed = nn.Embedding(num_queries, 2)
+        self.query_embed = nn.Embedding(num_queries, 2*self.num_patterns)
         relu_args = [True] * 3
         relu_args[n_input_proj-1] = False
         self.input_txt_proj = nn.Sequential(*[
@@ -176,9 +178,9 @@ class QDDETR(nn.Module):
             outputs_coord = outputs_coord.sigmoid()
             
         out = {'pred_logits': outputs_class[-1], 'pred_spans': outputs_coord[-1]}
-        if self.cls_both:
+        if self.m_classes is not None and self.cls_both:
             outputs_aux_class = self.aux_class_embed(hs)
-            out['pred_aux_logits'] = outputs_aux_class[-1]
+            out['aux_pred_logits'] = outputs_aux_class[-1]
 
         txt_mem = memory[:, src_vid.shape[1]:]  # (bsz, L_txt, d)
         vid_mem = memory[:, :src_vid.shape[1]]  # (bsz, L_vid, d)
@@ -225,7 +227,7 @@ class QDDETR(nn.Module):
                     {'pred_logits': a, 'pred_spans': b} for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
             else:
                 out['aux_outputs'] = [
-                    {'pred_logits': a, 'pred_aux_logits' : b, 'pred_spans': c} for a, b, c in zip(outputs_class[:-1], outputs_aux_class[:-1], outputs_coord[:-1])]
+                    {'pred_logits': a, 'aux_pred_logits' : b, 'pred_spans': c} for a, b, c in zip(outputs_class[:-1], outputs_aux_class[:-1], outputs_coord[:-1])]
             if self.contrastive_align_loss:
                 assert proj_queries is not None
                 for idx, d in enumerate(proj_queries[:-1]):
@@ -277,29 +279,20 @@ class SetCriterion(nn.Module):
         self.cls_both=cls_both
         self.score_fg=score_fg
         
-        if m_classes is None:
-            # foreground and background classification
-            self.foreground_label = 0
-            self.background_label = 1
+        # foreground and background classification
+        self.foreground_label = 0
+        self.background_label = 1
 
-            empty_weight = torch.ones(2)
-            empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
-            self.register_buffer('empty_weight', empty_weight)
-        else:
+        empty_weight = torch.ones(2)
+        empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
+        self.register_buffer('empty_weight', empty_weight)
+        if m_classes is not None: 
             self.num_classes = len(m_classes[1:-1].split(','))
-            empty_weight = torch.ones(self.num_classes+ 1)
-            empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
-            self.register_buffer('empty_weight', empty_weight) 
-            
-            if cls_both:
-                # foreground and background classification
-                self.foreground_label = 0
-                self.background_label = 1
-
-                aux_empty_weight = torch.ones(2)
+            if self.cls_both:
+                aux_empty_weight = torch.ones(self.num_classes+ 1)
                 aux_empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
-                self.register_buffer('aux_empty_weight', aux_empty_weight)     
-        
+                self.register_buffer('aux_empty_weight', aux_empty_weight) 
+            
         # for tvsum,
         self.use_matcher = use_matcher
 
@@ -353,45 +346,36 @@ class SetCriterion(nn.Module):
         # idx is a tuple of two 1D tensors (batch_idx, src_idx), of the same length == #objects in batch
         idx = self._get_src_permutation_idx(indices)
 
-        if self.m_classes is None:
-            target_classes = torch.full(src_logits.shape[:2], self.background_label,
+        target_classes = torch.full(src_logits.shape[:2], self.background_label,
+                                    dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
+        target_classes[idx] = self.foreground_label
+        
+        if self.m_classes is not None and self.cls_both:
+            aux_src_logits = outputs['aux_pred_logits']
+            aux_target_classes = torch.full(aux_src_logits.shape[:2], self.num_classes,
                                         dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
-            target_classes[idx] = self.foreground_label
-        else:
-            target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                        dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
 
-            target_classes_o = torch.cat([t["m_cls"][J] for t, (_, J) in zip(targets['moment_class'], indices)])
-            target_classes[idx] = target_classes_o
-            
-            if self.cls_both:
-                src_aux_logits = outputs['pred_aux_logits']
-                aux_target_classes = torch.full(src_aux_logits.shape[:2], self.background_label,
-                                            dtype=torch.int64, device=src_aux_logits.device)  # (batch_size, #queries)
-                aux_target_classes[idx] = self.foreground_label      
-
-
+            aux_target_classes_o = torch.cat([t["m_cls"][J] for t, (_, J) in zip(targets['moment_class'], indices)])
+            aux_target_classes[idx] = aux_target_classes_o
+   
         if self.label_loss_type == "ce":
             loss = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction="none")
         else:
             loss = focal_loss(src_logits.transpose(1, 2), target_classes, self.empty_weight, self.focal_alpha, self.focal_gamma)
 
-        if self.cls_both:
+        if self.m_classes is not None and self.cls_both:
             if self.aux_label_loss_type == "ce":
-                loss += F.cross_entropy(src_aux_logits.transpose(1, 2), aux_target_classes, self.aux_empty_weight, reduction="none")
+                loss += F.cross_entropy(aux_src_logits.transpose(1, 2), aux_target_classes, self.aux_empty_weight, reduction="none")
             else:
-                loss += focal_loss(src_aux_logits.transpose(1, 2), aux_target_classes, self.aux_empty_weight, self.aux_focal_alpha, self.aux_focal_gamma)
+                loss += focal_loss(aux_src_logits.transpose(1, 2), aux_target_classes, self.aux_empty_weight, self.aux_focal_alpha, self.aux_focal_gamma)
 
         losses = {'loss_label': loss.mean()}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
-            if self.m_classes is None:
-                losses['class_error'] = 100 - accuracy(src_logits[idx], self.foreground_label)[0]
-            else:
-                losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
-                if self.cls_both:
-                    losses['aux_class_error'] = 100 - accuracy(src_aux_logits[idx], self.foreground_label)[0]
+            losses['class_error'] = 100 - accuracy(src_logits[idx], self.foreground_label)[0]
+            if self.m_classes is not None and self.cls_both:
+                losses['aux_class_error'] = 100 - accuracy(aux_src_logits[idx], self.foreground_label)[0]
         return losses
 
     def loss_saliency(self, outputs, targets, indices, log=True):

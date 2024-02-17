@@ -17,7 +17,8 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
     def __init__(self,  cost_class: float = 1, cost_span: float = 1, cost_giou: float = 1,
-                 span_loss_type: str = "l1", max_v_l: int = 75):
+                 span_loss_type: str = "l1", max_v_l: int = 75,
+                 num_queries : int = 10, m_classes=None, cc_matcing=False):
         """Creates the matcher
 
         Params:
@@ -32,6 +33,10 @@ class HungarianMatcher(nn.Module):
         self.max_v_l = max_v_l
         self.foreground_label = 0
         assert cost_class != 0 or cost_span != 0 or cost_giou != 0, "all costs cant be 0"
+        
+        self.num_queries = num_queries
+        self.m_classes = m_classes
+        self.cc_matching = cc_matcing
 
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -54,6 +59,81 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_spans)
         """
+
+        if self.m_classes is not None and self.cc_matching:
+            num_classes = len(self.m_classes[1:-1].split(','))
+            bs = outputs["pred_spans"].shape[0]
+            classwise_indices = []
+            for c in range(num_classes):
+                spans = []; sizes = []
+                for i, v in enumerate(targets["moment_class"]):
+                    count = 0
+                    for j, m in enumerate(v["m_cls"]):
+                        if m == c:
+                            count += 1; spans.append(targets["span_labels"][i]["spans"][j].unsqueeze(0))
+                    sizes.append(count)
+                if len(spans) == 0:
+                    continue
+                    
+                tgt_spans = torch.cat(spans)
+                
+                out_prob = outputs["pred_logits"][:, (self.num_queries*c):self.num_queries*(c+1), :].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
+                tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
+                cost_class = -out_prob[:, tgt_ids] 
+                
+                if 'aux_pred_logits' in outputs.keys():
+                    aux_out_prob = outputs["aux_pred_logits"][:, (self.num_queries*c):self.num_queries*(c+1), :].flatten(0, 1).softmax(-1)
+                    aux_tgt_ids = torch.full([len(tgt_spans)], c)
+                    cost_class += (-aux_out_prob[:, aux_tgt_ids])
+    
+                # We flatten to compute the cost matrices in a batch
+                out_spans = outputs["pred_spans"][:, (self.num_queries*c):self.num_queries*(c+1), :].flatten(0, 1)  # [batch_size * num_queries, 2]
+
+                # Compute the L1 cost between spans
+                cost_span = torch.cdist(out_spans, tgt_spans, p=1)  # [batch_size * num_queries, total #spans in the batch]
+
+                # Compute the giou cost between spans
+                # [batch_size * num_queries, total #spans in the batch]
+                cost_giou = - generalized_temporal_iou(span_cxw_to_xx(out_spans), span_cxw_to_xx(tgt_spans))
+
+                # Final cost matrix
+                # import ipdb; ipdb.set_trace()
+                C = self.cost_span * cost_span + self.cost_giou * cost_giou + self.cost_class * cost_class
+                C = C.view(bs, self.num_queries, -1).cpu()
+
+                # indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+                # classwise_indices.append([(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices])
+                
+                batch2idx = {}
+                for i, c in enumerate(C.split(sizes, -1)):
+                    pred, gt = linear_sum_assignment(c[i])
+                    if len(gt) > 0:
+                        gt_idx2pred_idx = {}
+                        for j, g in enumerate(gt):
+                            gt_idx2pred_idx[g] = pred[j]
+                        batch2idx[i] = gt_idx2pred_idx
+                classwise_indices.append(batch2idx)
+            
+            final_indices = []
+            for i, v in enumerate(targets["moment_class"]): # batch wise
+                # v = {'m_cls': tensor([2, 1, 0, 0, 0], device='cuda:0')}
+                final = [] # (pred, gt)
+                cls_idx = [0] * num_classes
+                
+                gt_idxs = []
+                pred_idxs = []
+                for j, m in enumerate(v["m_cls"]): # iter tensor([2, 1, 0, 0, 0]
+                    cls_num = int(m)
+                    gt_idx = cls_idx[cls_num]
+                    pred_idx = classwise_indices[cls_num][i][gt_idx]
+                    pred_idx += (self.num_queries*cls_num)
+                    gt_idxs.append(j)
+                    pred_idxs.append(pred_idx)
+                    cls_idx[cls_num] += 1
+                final_indices.append((torch.as_tensor(pred_idxs, dtype=torch.int64), torch.as_tensor(gt_idxs, dtype=torch.int64)))
+                    
+            return final_indices
+        
         bs, num_queries = outputs["pred_spans"].shape[:2]
         # targets = targets["span_labels"]
 
@@ -61,20 +141,17 @@ class HungarianMatcher(nn.Module):
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
         tgt_spans = torch.cat([v["spans"] for v in targets["span_labels"]])  # [num_target_spans in batch, 2]
 
-        if 'moment_class' not in targets.keys():
-            tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
-        else:
-            tgt_ids = torch.cat([v["m_cls"] for v in targets['moment_class']])
-            if 'pred_aux_logits' in outputs.keys():
-                aux_out_prob = outputs["pred_aux_logits"].flatten(0, 1).softmax(-1)
-                aux_tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
+        tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
+        
+        if 'aux_pred_logits' in outputs.keys():
+            aux_out_prob = outputs["aux_pred_logits"].flatten(0, 1).softmax(-1)
+            aux_tgt_ids = torch.cat([v["m_cls"] for v in targets['moment_class']])   # [total #spans in the batch]
                 
-
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - prob[target class].
         # The 1 is a constant that doesn't change the matching, it can be omitted.
         cost_class = -out_prob[:, tgt_ids]  # [batch_size * num_queries, total #spans in the batch]
-        if 'pred_aux_logits' in outputs.keys():
+        if 'aux_pred_logits' in outputs.keys():
             cost_class += (-aux_out_prob[:, aux_tgt_ids])
 
         if self.span_loss_type == "l1":
@@ -113,5 +190,6 @@ class HungarianMatcher(nn.Module):
 def build_matcher(args):
     return HungarianMatcher(
         cost_span=args.set_cost_span, cost_giou=args.set_cost_giou,
-        cost_class=args.set_cost_class, span_loss_type=args.span_loss_type, max_v_l=args.max_v_l
+        cost_class=args.set_cost_class, span_loss_type=args.span_loss_type, max_v_l=args.max_v_l,
+        num_queries=args.num_queries, m_classes=args.m_classes, cc_matcing=args.cc_matching,
     )

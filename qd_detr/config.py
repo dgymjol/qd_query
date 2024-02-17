@@ -112,6 +112,8 @@ class BaseOptions(object):
         parser.add_argument('--num_queries', default=10, type=int,
                             help="Number of query slots")
         parser.add_argument('--pre_norm', action='store_true')
+        parser.add_argument('--tgt_embed', action='store_true')
+        
         # other model configs
         parser.add_argument("--n_input_proj", type=int, default=2, help="#layers to encoder input")
         parser.add_argument("--contrastive_hdim", type=int, default=64, help="dim for contrastive embeddings")
@@ -143,6 +145,7 @@ class BaseOptions(object):
                             help="giou span coefficient in the matching cost")
         parser.add_argument('--set_cost_class', default=4, type=float,
                             help="Class coefficient in the matching cost")
+        parser.add_argument('--cc_matching', action="store_true")
 
         # * Loss coefficients
         parser.add_argument('--span_loss_coef', default=10, type=float)

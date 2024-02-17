@@ -2,7 +2,7 @@ dset_name=hl
 ctx_mode=video_tef
 v_feat_types=slowfast_clip
 t_feat_type=clip 
-results_root=results_cc_tgt_0
+results_root=results_cc_tgt_1
 exp_id=exp
 
 ######## data paths

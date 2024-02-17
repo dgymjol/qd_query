@@ -73,6 +73,7 @@ class HungarianMatcher(nn.Module):
                             count += 1; spans.append(targets["span_labels"][i]["spans"][j].unsqueeze(0))
                     sizes.append(count)
                 if len(spans) == 0:
+                    classwise_indices.append([])
                     continue
                     
                 tgt_spans = torch.cat(spans)

@@ -2,7 +2,7 @@ dset_name=hl
 ctx_mode=video_tef
 v_feat_types=slowfast_clip
 t_feat_type=clip 
-results_root=results_focal_gamma1
+results_root=results_cc_tgt_0
 exp_id=exp
 
 ######## data paths
@@ -38,72 +38,95 @@ fi
 bsz=32
 
 
-# "0.2 0.4 0.6 0.8 1.0"
+# cc-matching 
+# tgt_embed
+# cls_both x
 
-for gamma in "1.0" "2.0" "4.0"
+for gamma in "1.0" "1.5"
 do
     echo "class focal : $gamma"
     
-    for aux_gamma in "1.0" "2.0" "4.0"
-    do
-        echo "fg bg focal : $aux_gamma"
+    CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+    --dset_name ${dset_name} \
+    --ctx_mode ${ctx_mode} \
+    --train_path ${train_path} \
+    --eval_path ${eval_path} \
+    --eval_split_name ${eval_split_name} \
+    --v_feat_dirs ${v_feat_dirs[@]} \
+    --v_feat_dim ${v_feat_dim} \
+    --t_feat_dir ${t_feat_dir} \
+    --t_feat_dim ${t_feat_dim} \
+    --bsz ${bsz} \
+    --results_root ${results_root} \
+    --exp_id ${exp_id} \
+    --m_classes "[10, 30, 70, 150]" \
+    --cc_matching \
+    --tgt_embed \
+    --label_loss_type "focal" \
+    --focal_gamma ${gamma} \
+    ${@:1}
 
-        CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
-        --dset_name ${dset_name} \
-        --ctx_mode ${ctx_mode} \
-        --train_path ${train_path} \
-        --eval_path ${eval_path} \
-        --eval_split_name ${eval_split_name} \
-        --v_feat_dirs ${v_feat_dirs[@]} \
-        --v_feat_dim ${v_feat_dim} \
-        --t_feat_dir ${t_feat_dir} \
-        --t_feat_dim ${t_feat_dim} \
-        --bsz ${bsz} \
-        --results_root ${results_root} \
-        --exp_id ${exp_id} \
-        --cls_both \
-        --m_classes "[10, 30, 70, 150]" \
-        --label_loss_type "focal" \
-        --focal_gamma ${gamma} \
-        --aux_label_loss_type "focal" \
-        --aux_focal_gamma ${aux_gamma} \
-        --set_cost_class 2\
-        ${@:1}
+    CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+    --dset_name ${dset_name} \
+    --ctx_mode ${ctx_mode} \
+    --train_path ${train_path} \
+    --eval_path ${eval_path} \
+    --eval_split_name ${eval_split_name} \
+    --v_feat_dirs ${v_feat_dirs[@]} \
+    --v_feat_dim ${v_feat_dim} \
+    --t_feat_dir ${t_feat_dir} \
+    --t_feat_dim ${t_feat_dim} \
+    --bsz ${bsz} \
+    --results_root ${results_root} \
+    --exp_id ${exp_id} \
+    --m_classes "[10, 30, 70, 150]" \
+    --cc_matching \
+    --tgt_embed \
+    --label_loss_type "focal" \
+    --focal_gamma ${gamma} \
+    --set_cost_class 2\
+    ${@:1}
 
-    done
-done
+    CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+    --dset_name ${dset_name} \
+    --ctx_mode ${ctx_mode} \
+    --train_path ${train_path} \
+    --eval_path ${eval_path} \
+    --eval_split_name ${eval_split_name} \
+    --v_feat_dirs ${v_feat_dirs[@]} \
+    --v_feat_dim ${v_feat_dim} \
+    --t_feat_dir ${t_feat_dir} \
+    --t_feat_dim ${t_feat_dim} \
+    --bsz ${bsz} \
+    --results_root ${results_root} \
+    --exp_id ${exp_id} \
+    --m_classes "[10, 30, 70, 150]" \
+    --cc_matching \
+    --tgt_embed \
+    --label_loss_type "focal" \
+    --focal_gamma ${gamma} \
+    --label_loss_coef 2\
+    ${@:1}
 
-
-for gamma in "1.0" "2.0" "4.0"
-do
-    echo "class focal : $gamma"
-    
-    for aux_gamma in "1.0" "2.0" "4.0"
-    do
-        echo "fg bg focal : $aux_gamma"
-
-        CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
-        --dset_name ${dset_name} \
-        --ctx_mode ${ctx_mode} \
-        --train_path ${train_path} \
-        --eval_path ${eval_path} \
-        --eval_split_name ${eval_split_name} \
-        --v_feat_dirs ${v_feat_dirs[@]} \
-        --v_feat_dim ${v_feat_dim} \
-        --t_feat_dir ${t_feat_dir} \
-        --t_feat_dim ${t_feat_dim} \
-        --bsz ${bsz} \
-        --results_root ${results_root} \
-        --exp_id ${exp_id} \
-        --cls_both \
-        --m_classes "[10, 30, 70, 150]" \
-        --label_loss_type "focal" \
-        --focal_gamma ${gamma} \
-        --aux_label_loss_type "focal" \
-        --aux_focal_gamma ${aux_gamma} \
-        --set_cost_class 2\
-        --label_loss_coef 8\
-        ${@:1}
-
-    done
+    CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+    --dset_name ${dset_name} \
+    --ctx_mode ${ctx_mode} \
+    --train_path ${train_path} \
+    --eval_path ${eval_path} \
+    --eval_split_name ${eval_split_name} \
+    --v_feat_dirs ${v_feat_dirs[@]} \
+    --v_feat_dim ${v_feat_dim} \
+    --t_feat_dir ${t_feat_dir} \
+    --t_feat_dim ${t_feat_dim} \
+    --bsz ${bsz} \
+    --results_root ${results_root} \
+    --exp_id ${exp_id} \
+    --m_classes "[10, 30, 70, 150]" \
+    --cc_matching \
+    --tgt_embed \
+    --label_loss_type "focal" \
+    --focal_gamma ${gamma} \
+    --set_cost_class 2\
+    --label_loss_coef 2\
+    ${@:1}
 done

@@ -49,7 +49,7 @@ class QDDETR(nn.Module):
                  num_queries, input_dropout, aux_loss=False,
                  contrastive_align_loss=False, contrastive_hdim=64,
                  max_v_l=75, span_loss_type="l1", use_txt_pos=False, n_input_proj=2, aud_dim=0, 
-                 m_classes=None, cls_both=False, score_fg=False):
+                 m_classes=None, cls_both=False, score_fg=False, class_anchor=False,):
         """ Initializes the model.
         Parameters:
             transformer: torch module of the transformer architecture. See transformer.py
@@ -90,7 +90,10 @@ class QDDETR(nn.Module):
             self.num_patterns = 1
         else:
             self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
-            self.num_patterns = len(self.m_vals)
+            if class_anchor:
+                self.num_patterns = len(self.m_vals)
+            else:
+                self.num_patterns = 1
             self.aux_class_embed = nn.Linear(hidden_dim, len(self.m_vals) +1 )  # [:-1] : foreground / [-1] : background
             self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
                 
@@ -629,7 +632,8 @@ def build_model(args):
             use_txt_pos=args.use_txt_pos,
             n_input_proj=args.n_input_proj,
             m_classes=args.m_classes,
-            cls_both=args.cls_both, score_fg=args.score_fg
+            cls_both=args.cls_both, score_fg=args.score_fg,
+            class_anchor=args.class_anchor,
         )
     else:
         model = QDDETR(
@@ -648,7 +652,8 @@ def build_model(args):
             use_txt_pos=args.use_txt_pos,
             n_input_proj=args.n_input_proj,
             m_classes=args.m_classes,
-            cls_both=args.cls_both, score_fg=args.score_fg
+            cls_both=args.cls_both, score_fg=args.score_fg,
+            class_anchor=args.class_anchor,
         )
 
     matcher = build_matcher(args)

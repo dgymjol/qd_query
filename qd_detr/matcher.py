@@ -62,7 +62,9 @@ class HungarianMatcher(nn.Module):
 
         if self.m_classes is not None and self.cc_matching:
             num_classes = len(self.m_classes[1:-1].split(','))
-            bs = outputs["pred_spans"].shape[0]
+            bs, total_queries = outputs["pred_spans"].shape[0:2]
+            assert (num_classes*self.num_queries) == total_queries # no class anchor & no tgt_embed & yes cc_matching => error
+            
             classwise_indices = []
             for c in range(num_classes):
                 spans = []; sizes = []

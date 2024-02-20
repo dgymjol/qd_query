@@ -65,6 +65,7 @@ class Transformer(nn.Module):
                  modulate_t_attn=True,
                  bbox_embed_diff_each_layer=False,
                  m_classes=None, tgt_embed=False,
+                 class_anchor=False,
                  ):
         super().__init__()
 
@@ -99,6 +100,7 @@ class Transformer(nn.Module):
 
         self.m_classes = m_classes
         self.tgt_embed = tgt_embed
+        self.class_anchor = class_anchor
         
         if m_classes is not None and self.tgt_embed:
             self.num_patterns = len(m_classes[1:-1].split(','))
@@ -126,14 +128,14 @@ class Transformer(nn.Module):
         src = src.permute(1, 0, 2)  # (L, batch_size, d)
         pos_embed = pos_embed.permute(1, 0, 2)   # (L, batch_size, d)
 
-        if self.m_classes is None:
-            refpoint_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)  # (#queries, batch_size, d)
-        else:
+        if self.m_classes is not None and self.class_anchor:
             num_queries = query_embed.shape[0]
             # class_query_embed = query_embed.view(num_queries, -1, 2).permute(1, 0, 2)
             class_refpoint_embed = query_embed.unsqueeze(1).repeat(1, bs, 1).view(num_queries, bs, -1, 2).permute(2, 0, 1, 3)  # (#class, #queries, batch_size, d)
             refpoint_embed = torch.concat([rp for rp in class_refpoint_embed], dim=0) # (#class * #queries, batch_size, d)
-            
+        else:
+            refpoint_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)  # (#queries, batch_size, d)
+                  
         src = self.t2v_encoder(src, src_key_padding_mask=mask, pos=pos_embed, video_length=video_length)  # (L, batch_size, d)
         # print('after encoder : ',src.shape)
         src = src[:video_length + 1]
@@ -148,11 +150,11 @@ class Transformer(nn.Module):
 
         if self.m_classes is not None and self.tgt_embed:
             tgt = self.patterns.weight[:, None, None, :].repeat(1, self.num_queries, bs, 1).flatten(0, 1)
-            # refpoint_embed = refpoint_embed.repeat(self.num_patterns, 1, 1)
+            if not self.class_anchor:
+                refpoint_embed = refpoint_embed.repeat(self.num_patterns, 1, 1)
+            # ref_point_embed (30, 32, 2)
         else:
             tgt = torch.zeros(refpoint_embed.shape[0], bs, d).cuda()
-            
-            
         
         hs, references = self.decoder(tgt, memory_local, memory_key_padding_mask=mask_local,
                           pos=pos_embed_local, refpoints_unsigmoid=refpoint_embed)  # (#layers, #queries, batch_size, d)
@@ -797,6 +799,7 @@ def build_transformer(args):
         m_classes=args.m_classes,
         tgt_embed=args.tgt_embed,
         num_queries=args.num_queries,
+        class_anchor=args.class_anchor,
     )
 
 

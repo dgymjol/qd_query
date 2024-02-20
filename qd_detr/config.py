@@ -89,6 +89,7 @@ class BaseOptions(object):
         parser.add_argument('--m_classes', type=str, default=None)
         parser.add_argument('--cls_both', action="store_true")
         parser.add_argument('--score_fg', action="store_true")
+        parser.add_argument('--class_anchor', action="store_true")
         
         
         # * Transformer

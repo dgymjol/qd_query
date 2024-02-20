@@ -18,7 +18,8 @@ class HungarianMatcher(nn.Module):
     """
     def __init__(self,  cost_class: float = 1, cost_span: float = 1, cost_giou: float = 1,
                  span_loss_type: str = "l1", max_v_l: int = 75,
-                 num_queries : int = 10, m_classes=None, cc_matcing=False):
+                 num_queries : int = 10, m_classes=None, cc_matcing=False,
+                 class_anchor=False, tgt_embed=False,):
         """Creates the matcher
 
         Params:
@@ -35,8 +36,17 @@ class HungarianMatcher(nn.Module):
         assert cost_class != 0 or cost_span != 0 or cost_giou != 0, "all costs cant be 0"
         
         self.num_queries = num_queries
+
         self.m_classes = m_classes
+        if m_classes is not None:
+            self.num_classes = len(self.m_classes[1:-1].split(','))
+        
         self.cc_matching = cc_matcing
+        if self.cc_matching:
+            assert m_classes is not None
+
+            if not tgt_embed and not class_anchor:        
+                self.num_queries = num_queries // self.num_classes
 
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -61,12 +71,10 @@ class HungarianMatcher(nn.Module):
         """
 
         if self.m_classes is not None and self.cc_matching:
-            num_classes = len(self.m_classes[1:-1].split(','))
-            bs, total_queries = outputs["pred_spans"].shape[0:2]
-            assert (num_classes*self.num_queries) == total_queries # no class anchor & no tgt_embed & yes cc_matching => error
-            
+            bs = outputs["pred_spans"].shape[0]
+
             classwise_indices = []
-            for c in range(num_classes):
+            for c in range(self.num_classes):
                 spans = []; sizes = []
                 for i, v in enumerate(targets["moment_class"]):
                     count = 0
@@ -121,7 +129,7 @@ class HungarianMatcher(nn.Module):
             for i, v in enumerate(targets["moment_class"]): # batch wise
                 # v = {'m_cls': tensor([2, 1, 0, 0, 0], device='cuda:0')}
                 final = [] # (pred, gt)
-                cls_idx = [0] * num_classes
+                cls_idx = [0] * self.num_classes
                 
                 gt_idxs = []
                 pred_idxs = []
@@ -195,4 +203,5 @@ def build_matcher(args):
         cost_span=args.set_cost_span, cost_giou=args.set_cost_giou,
         cost_class=args.set_cost_class, span_loss_type=args.span_loss_type, max_v_l=args.max_v_l,
         num_queries=args.num_queries, m_classes=args.m_classes, cc_matcing=args.cc_matching,
+        tgt_embed=args.tgt_embed, class_anchor=args.class_anchor,
     )

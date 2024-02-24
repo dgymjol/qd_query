@@ -69,7 +69,7 @@ def compute_mr_ap(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10),
     return iou_thd2ap
 
 
-def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10)):
+def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.3, 0.95, 14)):
     """If a predicted segment has IoU >= iou_thd with one of the 1st GT segment, we define it positive"""
     iou_thds = [float(f"{e:.2f}") for e in iou_thds]
     pred_qid2window = {d["qid"]: d["pred_relevant_windows"][0][:2] for d in submission}  # :2 rm scores
@@ -91,9 +91,10 @@ def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10))
     gt_windows = np.array([gt_qid2window[k] for k in qids]).astype(float)
     pred_gt_iou = compute_temporal_iou_batch_paired(pred_windows, gt_windows)
     iou_thd2recall_at_one = {}
+    miou_at_one = float(f"{np.mean(pred_gt_iou) * 100:.2f}")
     for thd in iou_thds:
         iou_thd2recall_at_one[str(thd)] = float(f"{np.mean(pred_gt_iou >= thd) * 100:.2f}")
-    return iou_thd2recall_at_one
+    return iou_thd2recall_at_one, miou_at_one
 
 
 def get_window_len(window):
@@ -144,11 +145,25 @@ def eval_moment_retrieval(submission, ground_truth, verbose=True):
         _submission, _ground_truth = get_data_by_range(submission, ground_truth, l_range)
         print(f"{name}: {l_range}, {len(_ground_truth)}/{len(ground_truth)}="
               f"{100*len(_ground_truth)/len(ground_truth):.2f} examples.")
-        iou_thd2average_precision = compute_mr_ap(_submission, _ground_truth, num_workers=8, chunksize=50)
-        iou_thd2recall_at_one = compute_mr_r1(_submission, _ground_truth)
-        ret_metrics[name] = {"MR-mAP": iou_thd2average_precision, "MR-R1": iou_thd2recall_at_one}
-        if verbose:
-            print(f"[eval_moment_retrieval] [{name}] {time.time() - start_time:.2f} seconds")
+        if len(_ground_truth) == 0:
+            # ret_metrics[name] = {"MR-mAP": 0., "MR-R1": 0.}
+            dummy_dict = {}
+            for k in np.linspace(0.5, 0.95, 19):
+                dummy_dict[k] = 0.
+            dummy_dict['average'] = 0.
+            ret_metrics[name] = {"MR-mAP": dummy_dict, "MR-R1": dummy_dict}
+        else:
+            iou_thd2average_precision = compute_mr_ap(_submission, _ground_truth, num_workers=8, chunksize=50)
+            iou_thd2recall_at_one, miou_at_one = compute_mr_r1(_submission, _ground_truth)
+            ret_metrics[name] = {"MR-mIoU": miou_at_one,
+                                 "MR-mAP": iou_thd2average_precision,
+                                 "MR-R1": iou_thd2recall_at_one}
+
+            # iou_thd2average_precision = compute_mr_ap(_submission, _ground_truth, num_workers=8, chunksize=50)
+            # iou_thd2recall_at_one = compute_mr_r1(_submission, _ground_truth)
+            # ret_metrics[name] = {"MR-mAP": iou_thd2average_precision, "MR-R1": iou_thd2recall_at_one}
+            if verbose:
+                print(f"[eval_moment_retrieval] [{name}] {time.time() - start_time:.2f} seconds")
     return ret_metrics
 
 
@@ -298,6 +313,8 @@ def eval_submission(submission, ground_truth, verbose=True, match_number=True):
             "MR-short-mAP": moment_ret_scores["short"]["MR-mAP"]["average"],
             "MR-middle-mAP": moment_ret_scores["middle"]["MR-mAP"]["average"],
             "MR-long-mAP": moment_ret_scores["long"]["MR-mAP"]["average"],
+            "MR-full-mIoU": moment_ret_scores["full"]["MR-mIoU"],
+            "MR-full-R1@0.3": moment_ret_scores["full"]["MR-R1"]["0.3"],
             "MR-full-R1@0.5": moment_ret_scores["full"]["MR-R1"]["0.5"],
             "MR-full-R1@0.7": moment_ret_scores["full"]["MR-R1"]["0.7"],
         }

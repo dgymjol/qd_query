@@ -21,7 +21,7 @@ class BaseOptions(object):
     def initialize(self):
         self.initialized = True
         parser = argparse.ArgumentParser()
-        parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum'])
+        parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum', 'charadesSTA', 'tacos'])
         parser.add_argument("--dset_domain", type=str, choices=["BK", "BT", "DS", "FM", "GA", "MS", "PK", "PR", "VT", "VU"], 
                             help="Domain to train for tvsum dataset. (Only used for tvsum)")
         
@@ -94,6 +94,8 @@ class BaseOptions(object):
         
         # * Transformer
         parser.add_argument('--enc_layers', default=2, type=int,
+                            help="Number of encoding layers in the transformer")
+        parser.add_argument('--t2v_enc_layers', default=2, type=int,
                             help="Number of encoding layers in the transformer")
         parser.add_argument('--dec_layers', default=2, type=int,
                             help="Number of decoding layers in the transformer")

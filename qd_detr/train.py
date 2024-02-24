@@ -341,6 +341,8 @@ def start_training():
     print(opt.a_feat_dir is None)
     print(opt.a_feat_dir)
     print('##################')
+
+    assert opt.max_windows <= opt.num_queries # for matching
     if opt.a_feat_dir is None:
         dataset_config = dict(
             dset_name=opt.dset_name,

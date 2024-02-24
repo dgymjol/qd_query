@@ -110,13 +110,13 @@ def compute_hl_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
         outputs = model(**model_inputs)
 
         # loss meters
-        if criterion:
-            loss_dict = criterion(outputs, targets)
-            weight_dict = criterion.weight_dict
-            losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
-            loss_dict["loss_overall"] = float(losses)  # for logging only
-            for k, v in loss_dict.items():
-                loss_meters[k].update(float(v) * weight_dict[k] if k in weight_dict else float(v))
+        # if criterion:
+        #     loss_dict = criterion(outputs, targets)
+        #     weight_dict = criterion.weight_dict
+        #     losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+        #     loss_dict["loss_overall"] = float(losses)  # for logging only
+        #     for k, v in loss_dict.items():
+        #         loss_meters[k].update(float(v) * weight_dict[k] if k in weight_dict else float(v))
 
 
         preds = outputs['saliency_scores']
@@ -127,17 +127,48 @@ def compute_hl_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
 
             video_ap = []
             # Follow the UMT code "https://github.com/TencentARC/UMT/blob/main/datasets/tvsum.py"
-            for i in range(20):
+
+            if opt.dset_name in ["tvsum"]:
+                for i in range(20):
+                    pred=pred.cpu()
+                    cur_pred = pred[:len(label)]
+                    inds = torch.argsort(cur_pred, descending=True, dim=-1)
+
+                    # video_id = self.get_video_id(idx)
+                    cur_label = torch.Tensor(label)[:, i]
+                    cur_label = torch.where(cur_label > cur_label.median(), 1.0, .0)
+
+                    cur_label = cur_label[inds].tolist()[:topk]
+
+                    # if (num_gt := sum(cur_label)) == 0:
+                    num_gt = sum(cur_label)
+                    if num_gt == 0:
+                        video_ap.append(0)
+                        continue
+
+                    hits = ap = rec = 0
+                    prc = 1
+
+                    for j, gt in enumerate(cur_label):
+                        hits += gt
+
+                        _rec = hits / num_gt
+                        _prc = hits / (j + 1)
+
+                        ap += (_rec - rec) * (prc + _prc) / 2
+                        rec, prc = _rec, _prc
+
+                    video_ap.append(ap)
+            
+            elif opt.dset_name in ["youtube_uni"]:
                 cur_pred = pred[:len(label)]
+                # if opt.dset_name == "tvsum_sfc":
+                cur_pred = cur_pred.cpu()
                 inds = torch.argsort(cur_pred, descending=True, dim=-1)
 
-                # video_id = self.get_video_id(idx)
-                cur_label = torch.Tensor(label)[:, i]
-                cur_label = torch.where(cur_label > cur_label.median(), 1.0, .0)
 
-                cur_label = cur_label[inds].tolist()[:topk]
-
-                # if (num_gt := sum(cur_label)) == 0:
+                cur_label = torch.Tensor(label).squeeze()[inds].tolist()
+                
                 num_gt = sum(cur_label)
                 if num_gt == 0:
                     video_ap.append(0)
@@ -154,9 +185,13 @@ def compute_hl_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
 
                     ap += (_rec - rec) * (prc + _prc) / 2
                     rec, prc = _rec, _prc
-
-                video_ap.append(ap)
-            video_ap_collected.append(video_ap)  
+                
+                video_ap.append(float(ap))
+            else:
+                print("No such dataset")
+                exit(-1)
+                    
+            video_ap_collected.append(video_ap)
 
     mean_ap = np.mean(video_ap_collected)
     submmission = dict(mAP=round(mean_ap, 5))
@@ -222,6 +257,7 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
         for idx, (meta, spans, score) in enumerate(zip(query_meta, pred_spans.cpu(), scores.cpu())):
             if opt.span_loss_type == "l1":
                 spans = span_cxw_to_xx(spans) * meta["duration"]
+                spans = torch.clamp(spans, 0, meta["duration"])
             # # (#queries, 3), [st(float), ed(float), score(float)]
             cur_ranked_preds = torch.cat([spans, score[:, None]], dim=1).tolist()
             if not opt.no_sort_results:
@@ -251,11 +287,32 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
         for k, v in loss_meters.items():
             tb_writer.add_scalar("Eval/{}".format(k), v.avg, epoch_i + 1)
 
-    post_processor = PostProcessorDETR(
-        clip_length=2, min_ts_val=0, max_ts_val=150,
-        min_w_l=2, max_w_l=150, move_window_method="left",
-        process_func_names=("clip_ts", "round_multiple")
-    )
+    if opt.dset_name in ['hl']:
+        post_processor = PostProcessorDETR(
+            clip_length=opt.clip_length, min_ts_val=0, max_ts_val=150,
+            min_w_l=2, max_w_l=150, move_window_method="left",
+            process_func_names=("clip_ts", "round_multiple")
+        )
+    elif opt.dset_name in ['charadesSTA']:
+        if opt.v_feat_dim == 4096: # vgg
+            post_processor = PostProcessorDETR(
+                clip_length=opt.clip_length, min_ts_val=0, max_ts_val=360,
+                min_w_l=12, max_w_l=360, move_window_method="left",
+                process_func_names=("clip_ts", "round_multiple")
+            )
+        else:
+            post_processor = PostProcessorDETR(
+                clip_length=opt.clip_length, min_ts_val=0, max_ts_val=150,
+                min_w_l=2, max_w_l=60, move_window_method="left",
+                process_func_names=("clip_ts", "round_multiple")
+            )
+    else:
+        post_processor = PostProcessorDETR(
+            clip_length=opt.clip_length, min_ts_val=0, max_ts_val=50000,
+            min_w_l=0, max_w_l=50000, move_window_method="left",
+            process_func_names=(["round_multiple"])
+        )
+
     mr_res = post_processor(mr_res)
     return mr_res, loss_meters
 
@@ -274,27 +331,22 @@ def eval_epoch(model, eval_dataset, opt, save_submission_filename, epoch_i=None,
     else:
         criterion = None
 
-    if opt.a_feat_dir is None:
-        eval_loader = DataLoader(
-            eval_dataset,
-            collate_fn=start_end_collate,
-            batch_size=opt.eval_bsz,
-            num_workers=opt.num_workers,
-            shuffle=False,
-            pin_memory=opt.pin_memory
-        )
+    if opt.dset_name == 'tacos':
+        shuffle = True
     else:
-        eval_loader = DataLoader(
-            eval_dataset,
-            collate_fn=start_end_collate_audio,
-            batch_size=opt.eval_bsz,
-            num_workers=opt.num_workers,
-            shuffle=False,
-            pin_memory=opt.pin_memory
-        )
+        shuffle = False
+
+    eval_loader = DataLoader(
+        eval_dataset,
+        collate_fn=start_end_collate,
+        batch_size=opt.eval_bsz,
+        num_workers=opt.num_workers,
+        shuffle=shuffle,
+        pin_memory=opt.pin_memory
+    )
 
     # tvsum 
-    if opt.dset_name in ['tvsum']:
+    if opt.dset_name in ['tvsum', 'youtube_uni']:
         metrics, eval_loss_meters = compute_hl_results(model, eval_loader, opt, epoch_i, criterion, tb_writer)
         
         # to match original save format
@@ -308,6 +360,13 @@ def eval_epoch(model, eval_dataset, opt, save_submission_filename, epoch_i=None,
 
     else:
         submission, eval_loss_meters = get_eval_res(model, eval_loader, opt, epoch_i, criterion, tb_writer)
+
+        if opt.dset_name in ['charadesSTA', 'tacos', 'nlq']:
+            new_submission = []
+            for s in submission:
+                s.pop('pred_saliency_scores', None)
+                new_submission.append(s)
+            submission = new_submission
             
         if opt.no_sort_results:
             save_submission_filename = save_submission_filename.replace(".jsonl", "_unsorted.jsonl")
@@ -332,7 +391,19 @@ def setup_model(opt):
     if opt.resume is not None:
         logger.info(f"Load checkpoint from {opt.resume}")
         checkpoint = torch.load(opt.resume, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        if 'pt' in opt.resume[:-4]:
+            if 'asr' in opt.resume[:25]:
+                model.load_state_dict(checkpoint["model"])
+            else:
+                for k, v in checkpoint["model"].items():
+                    name = k[7:]  # remove `module.`
+                    new_state_dict[name] = v
+                # model.load_state_dict(checkpoint["model"])
+                model.load_state_dict(new_state_dict)
+        else:
+            model.load_state_dict(checkpoint["model"])
         if opt.resume_all:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])

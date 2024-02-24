@@ -58,6 +58,7 @@ def gen_sineembed_for_position(pos_tensor):
 class Transformer(nn.Module):
 
     def __init__(self, d_model=512, nhead=8, num_queries=2, num_encoder_layers=6,
+                 num_t2v_encoder_layers=6, 
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
                  return_intermediate_dec=False, query_dim=2,
@@ -72,7 +73,7 @@ class Transformer(nn.Module):
         t2v_encoder_layer = T2V_TransformerEncoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
-        self.t2v_encoder = TransformerEncoder(t2v_encoder_layer, num_encoder_layers, encoder_norm)
+        self.t2v_encoder = TransformerEncoder(t2v_encoder_layer, num_t2v_encoder_layers, encoder_norm)
 
 
         # TransformerEncoderLayerThin
@@ -793,6 +794,7 @@ def build_transformer(args):
         dim_feedforward=args.dim_feedforward,
         num_encoder_layers=args.enc_layers,
         num_decoder_layers=args.dec_layers,
+        num_t2v_encoder_layers=args.t2v_enc_layers,
         normalize_before=args.pre_norm,
         return_intermediate_dec=True,
         activation='prelu',

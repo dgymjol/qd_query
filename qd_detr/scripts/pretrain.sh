@@ -2,7 +2,7 @@ dset_name=hl
 ctx_mode=video_tef
 v_feat_types=slowfast_clip
 t_feat_type=clip 
-results_root=results
+results_root=results_pretrain_0
 exp_id=pt
 
 ######## data paths
@@ -11,7 +11,7 @@ eval_path=data/highlight_val_release.jsonl
 eval_split_name=val
 
 ######## setup video+text features
-feat_root=features
+feat_root=../features
 
 # video features
 v_feat_dim=0
@@ -42,7 +42,7 @@ max_es_cnt=100
 exp_id=pt
 
 
-PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --dset_name ${dset_name} \
 --ctx_mode ${ctx_mode} \
 --train_path ${train_path} \
@@ -58,4 +58,62 @@ PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --exp_id ${exp_id} \
 --n_epoch ${n_epoch} \
 --max_es_cnt ${max_es_cnt} \
+--m_classes "[10, 30, 70, 300]" \
+--tgt_embed \
+--cc_matching \
 ${@:1}
+
+# CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+# --dset_name ${dset_name} \
+# --ctx_mode ${ctx_mode} \
+# --train_path ${train_path} \
+# --eval_path ${eval_path} \
+# --eval_split_name ${eval_split_name} \
+# --v_feat_dirs ${v_feat_dirs[@]} \
+# --v_feat_dim ${v_feat_dim} \
+# --t_feat_dir ${t_feat_dir} \
+# --t_feat_dim ${t_feat_dim} \
+# --bsz ${bsz} \
+# --results_root ${results_root} \
+# --num_workers ${num_workers} \
+# --exp_id ${exp_id} \
+# --n_epoch ${n_epoch} \
+# --max_es_cnt ${max_es_cnt} \
+# --m_classes "[10, 30, 70, 300]" \
+# --cls_both \
+# --tgt_embed \
+# --class_anchor \
+# --cc_matching \
+# --set_cost_class 2 \
+# --label_loss_coef 2 \
+# --label_loss_type "focal" \
+# --focal_gamma "1.0" \
+# --aux_label_loss_type "focal" \
+# --aux_focal_gamma "1.0" \
+# ${@:1}
+
+
+# CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+# --dset_name ${dset_name} \
+# --ctx_mode ${ctx_mode} \
+# --train_path ${train_path} \
+# --eval_path ${eval_path} \
+# --eval_split_name ${eval_split_name} \
+# --v_feat_dirs ${v_feat_dirs[@]} \
+# --v_feat_dim ${v_feat_dim} \
+# --t_feat_dir ${t_feat_dir} \
+# --t_feat_dim ${t_feat_dim} \
+# --bsz ${bsz} \
+# --results_root ${results_root} \
+# --num_workers ${num_workers} \
+# --exp_id ${exp_id} \
+# --n_epoch ${n_epoch} \
+# --max_es_cnt ${max_es_cnt} \
+# --m_classes "[10, 30, 70, 300]" \
+# --cls_both \
+# --tgt_embed \
+# --class_anchor \
+# --cc_matching \
+# --set_cost_class 2 \
+# --label_loss_coef 2 \
+# ${@:1}
